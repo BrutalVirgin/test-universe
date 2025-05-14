@@ -1,0 +1,168 @@
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data2
+    ports:
+      - "5433:5432"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      retries: 5
+    restart: unless-stopped
+
+  prisma-migrator:
+    build:
+      context: .
+      dockerfile: prisma/Dockerfile
+    command: npx prisma migrate deploy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - app-network
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  nats:
+    image: nats:2.10
+    command: -js -m 8222
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/tmp/nats/jetstream
+    networks:
+      - app-network
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    volumes:
+      - ./gateway:/app/gateway
+      - ./common:/app/common
+      - ./tsconfig.json:/app/tsconfig.json
+    ports:
+      - "3000:3000"
+    networks:
+      - app-network
+    depends_on:
+      - prisma-migrator
+      - nats
+
+  fb-collector:
+    build:
+      context: .
+      dockerfile: fb-collector/Dockerfile
+    volumes:
+      - ./fb-collector:/app/fb-collector
+      - ./common:/app/common
+      - ./tsconfig.json:/app/tsconfig.json
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - app-network
+    depends_on:
+      - prisma-migrator
+      - nats
+      - gateway
+
+  ttk-collector:
+    build:
+      context: .
+      dockerfile: ttk-collector/Dockerfile
+    volumes:
+      - ./ttk-collector:/app/ttk-collector
+      - ./common:/app/common
+      - ./tsconfig.json:/app/tsconfig.json
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-events}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - app-network
+    depends_on:
+      - prisma-migrator
+      - nats
+      - gateway
+
+  reporter:
+    build:
+      context: .
+      dockerfile: reporter/Dockerfile
+    volumes:
+      - ./reporter:/app/reporter
+      - ./common:/app/common
+      - ./tsconfig.json:/app/tsconfig.json
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+    networks:
+      - app-network
+    ports:
+      - "3003:3000"
+    depends_on:
+      - prisma-migrator
+
+  publisher:
+    image: andriiuni/events
+    container_name: publisher
+    ports:
+      - "8080:8080"
+    networks:
+      - app-network
+    environment:
+     EVENT_ENDPOINT: "http://gateway:3000/gateway"
+
+  prometheus:
+    image: prom/prometheus:v2.46.0
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - app-network
+    depends_on:
+#      - gateway
+      - fb-collector
+      - ttk-collector
+      - reporter
+
+  grafana:
+    image: grafana/grafana:8.3.3
+    container_name: grafana
+    ports:
+      - "3004:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - app-network
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./prometheus/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./prometheus/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./prometheus/metrics:/var/lib/grafana/dashboards
+
+networks:
+  app-network:
+#    driver: bridge
+
+volumes:
+  pgdata:
+  nats-data:
+  grafana-data:

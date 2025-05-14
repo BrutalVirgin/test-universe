@@ -8,10 +8,9 @@ RUN npm install
 
 COPY ./tsconfig.json ./tsconfig.json
 COPY .env.* ./
-COPY gateway ./gateway
+COPY reporter ./reporter
 COPY common ./common
 COPY prisma ./prisma
-COPY nats ./nats
 COPY prometheus ./prometheus
 
 RUN npx prisma generate --schema=prisma/schema.prisma
@@ -25,5 +24,4 @@ WORKDIR /app
 COPY --from=builder /app ./
 RUN npm install
 
-CMD ["node", "dist/gateway/src/main.js"]
-
+CMD ["node", "dist/reporter/src/main.js"]

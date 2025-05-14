@@ -8,7 +8,7 @@ RUN npm install
 
 COPY ./tsconfig.json ./tsconfig.json
 COPY .env.* ./
-COPY gateway ./gateway
+COPY ttk-collector ./ttk-collector
 COPY common ./common
 COPY prisma ./prisma
 COPY nats ./nats
@@ -25,5 +25,4 @@ WORKDIR /app
 COPY --from=builder /app ./
 RUN npm install
 
-CMD ["node", "dist/gateway/src/main.js"]
-
+CMD ["node", "dist/ttk-collector/src/main.js"]
